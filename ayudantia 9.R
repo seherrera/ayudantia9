@@ -1,0 +1,280 @@
+# Ayudantia 9 Regresion Lineal y Regresion Logistica
+
+## Cargar Librerias 
+
+```{r, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(GGally)
+library(regclass)
+library(pROC)
+library(rsample)
+```
+
+## Cargar Datos
+
+```{r}
+setwd("D:/U/mineria de datos/Ayudantia_DataMining01_2021/Ayudantia 9")
+
+toyota <- read.csv("toyota.csv")
+vinos <- read.csv("winequality-red.csv")
+```
+
+En esta ayudantia veremos los dos modelos de regresion que suelen ser los mas conocidos o que se tiene la costumbre de utilizar en modelos supervisados, para ello se utilizaran dos datasets en esta ayudantia.
+
+## Regresion Lineal
+
+El primero que veremos será un dataset de los autos usados del fabricante toyota (link en bloc de notas), y lo utilizaremos para realizar un analisis   
+
+# Simple (Precio Auto)    
+```{r}
+summary(toyota)
+
+toyota %>% head()
+```
+
+Este dataset contiene informacion sobre el modelo del auto, año, precio, transmision, kilometraje, mpg (millas por galon), tipo de combustible, impuesto de circulacion, y tamaño del motor. (La data ya esta limpiada en cuanto a datos duplicados y columnas relevantes).
+
+En este analisis lo que buscaremos es predecir el precio al que podriamos vender mi auto en caso de tener un toyota en UK.
+
+Para esto transformamos las variables del modelo, transmision y tipo de combustible, a factores para trabajar con dichos valores como "etiquetas"
+```{r}
+toyota$model <- as.factor(toyota$model)
+toyota$transmission <- as.factor(toyota$transmission)
+toyota$fuelType <- as.factor(toyota$fuelType)
+
+summary(toyota)
+```
+Podemos ver que un valor en el tamaño del motor de 0 no tiene mucho sentido por lo que revisaremos cuantas observaciones presentan este este valor, y en caso de haber datos con valor 0 los eliminamos de nuestro dataset
+Corroboramos la existencia de valores na y nulos para ver si es necesario hacer esa limpieza.
+```{r}
+toyota %>% filter(engineSize == 0) %>% nrow()
+
+toyota <- toyota %>%  filter(engineSize != 0)
+
+summary(toyota)
+
+sum(is.na(toyota))
+sum(is.null(toyota))
+
+```
+
+Una vez ya listo nuestro datos, realizamos una visualizacion de nuestro datos numericos, para ver la correlacion que pueda existir entre las variables y la distribucion de los datos. 
+
+```{r, message=FALSE, warning=FALSE}
+toyota %>% select(year, mileage, tax, mpg, engineSize, price) %>% 
+  ggpairs(lower = list(continuous = wrap("points", alpha = 0.3, size = 0.5)))
+```
+
+Revisamos como se distribuyen los datos que pasamos a factor en relacion al precio, para esto utilizamos los boxplot lo que tambien nos ayudara a ver si existen valores atipicos que puedan alterar nuestro modelo
+
+```{r}
+toyota %>% 
+  ggplot(aes(transmission, price)) +
+  geom_boxplot()
+
+toyota %>% 
+  ggplot(aes(fuelType, price)) +
+  geom_boxplot()
+toyota %>% 
+  ggplot(aes(mileage, price)) +
+  geom_boxplot()
+toyota %>% mutate(model = reorder(model, price)) %>%
+  ggplot(aes(price, model)) +
+  geom_boxplot()
+```
+
+Graficamos las cuatro variables con mayores valores (no consideramos los tax) para ver como se distributen con el precio
+
+```{r}
+toyota %>% ggplot(aes(mileage, price)) +
+  geom_point(alpha = .1) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k=3))
+
+toyota %>% ggplot(aes(year, price)) +
+  geom_point(alpha = .1) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k=3))
+
+toyota %>% ggplot(aes(mpg, price)) +
+  geom_point(alpha = .1) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k=3))
+
+toyota %>% ggplot(aes(engineSize, price)) +
+  geom_point(alpha = .1) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k=3))
+
+toyota %>% filter(., year >= 2005) %>% ggplot(aes(year, price)) +
+  geom_point(alpha = .1) +
+  stat_smooth(method = "gam", formula = y ~ s(x, k=3))
+```
+
+Escalamos los datos antes de ralizar el analisis de regresion
+
+```{r}
+toyota_sca <- toyota
+toyota_sca[,c(2,3,5,7,8,9)] <- scale(toyota_sca[,c(2,3,5,7,8,9)])
+
+toyota_sca %>%  head()
+```
+
+Primero veremos el caso de una regresion simple, donde solo consideraremos el kilometraje para predecir el precio de nuesto vhiculo
+
+```{r}
+reg_simp <- lm(price ~ mileage, data = toyota)
+summary(reg_simp)
+```
+
+Los resultados de la regresion nos indican que los valores de los parametros son 1.479^-2 para el intercepto y -0.0901 para el coeficiente asociado a la variable superficie de terreno.
+
+Tambien se puede observar que el coeficiente de determinacion R2 es de 0.0888, lo que significa que el 8% de la varianza del precio esta explicada por el modelo lineal.
+
+Veamos que pasa ahora al considerar mas variables en nuestro modelo de regresion, para eso consideraremos el modelo, el año, su kilometraje, el tamaño del motor y las millas por galon.
+
+```{r}
+reg_mult <- lm(price ~ model + year*mileage + engineSize + mpg, data = toyota_sca)
+summary(reg_mult)
+```
+Los resultados de la regresion multiple no muestran un coeficiente de determinacion del 90%, y se puede ver que todas las variables son significativas a excepcion de algunos modelos de autos que no tienen significancia para nuestro modelo.
+
+Revisamos el valor del facto de inflacion de la varianza, este factor nos permite entender la colinealidad de los datos. 
+
+Un VIF por encima de 4 o una tolerancia por debajo de 0,25 indica que podría existir multicolinealidad y se requiere más investigación.
+
+```{r}
+VIF(reg_mult)
+```
+
+```{r}
+library(olsrr)
+
+fuerza_bruta <- ols_step_all_possible(reg_mult)
+
+plot(fuerza_bruta)
+```
+
+## Regresion Logistica (vinos)
+
+Para el segundo modelo que veremos se utilizara un sample de un dataset con informacion sobre vinos
+```{r}
+summary(vinos)
+vinos %>% head()
+```
+
+
+```{r}
+glimpse(vinos)
+
+ggplot(vinos,aes(x=factor(pH))) +
+  geom_bar(col ="black",fill="#993333",alpha=0.5) +
+  theme(axis.text.x = element_text(face="bold", size=10)) +
+  scale_x_discrete("PH") +
+  scale_y_continuous("Count")
+
+ggplot(vinos,aes(factor(quality))) +
+  geom_bar(col ="black",fill="#993333",alpha=0.5) +
+  theme(axis.text.x = element_text(face="bold", size=8, angle=30)) +
+  scale_y_continuous("Count",limits = c(0,1500),breaks=seq(0,15000,by=1500)) +
+  scale_x_discrete("quality")
+```
+
+```{r}
+d <- vinos %>% 
+  group_by(quality) %>%
+  count() %>%
+  arrange(match(arrival_date_month,month.name))
+d <- data.frame(ArrivalDateMonth = d$arrival_date_month,N =d$n)
+d
+```
+
+```{r}
+ggplot(data = vinos,aes(factor(pH)))+
+  geom_bar( col='black', fill="#993333", alpha = 0.5) +
+    scale_x_discrete("ph") +
+  scale_y_continuous("Count",limits = c(0,5000),breaks=seq(0,47222,by=5000))  +
+  theme(axis.text.x = element_text(face="bold", size=10))
+```
+
+```{r}
+acidityRate <- vinos %>%
+    summarise(fixed.acidity) 
+acidityRate <- as.data.frame(acidityRate)
+acidityRate
+```
+
+```{r}
+ggplot(data = vinos, aes(x = factor(pH), y = quality  )) + 
+  geom_boxplot(col='black', fill="#993333", alpha = 0.5) +
+  theme(axis.text.x = element_text(face="bold", size=10)) +
+  scale_y_continuous("quality",limits = c(1,7),breaks=seq(1,8,by=1)) +
+  scale_x_discrete("pH")
+```
+
+```{r}
+no contamos con variables buleanas por lo que no realizaremos esta parte
+#set.seed(369)
+#glm.fit <- glm(citric.acid~ alcohol, data = vinos , family = "binomial")
+
+#glm.fit <- glm(is_canceled ~ hotel + lead_time + arrival_date_month + children +
+#                        market_segment + is_repeated_guest + adults + babies +
+#                        previous_cancellations +
+#                        deposit_type + booking_changes  +
+#                        reserved_room_type + adr + days_in_waiting_list + customer_type +
+#                        total_of_special_requests, 
+#                        data = vinos , family = "binomial")
+#summary(glm.fit)
+reg_vin <- lm(pH ~ quality, data = vinos)
+```
+
+```{r}
+prob <- predict(reg_vin, type = c("response"))
+
+vinos$prob <- prob
+
+#curva_roc <- roc(pH ~ prob, data = vinos)
+
+#plot(curva_roc)
+
+#auc(curva_roc)
+```
+
+```{r}
+#vinos$prob <- NULL
+
+#modelo_log_multi <- glm(is_canceled ~ hotel + lead_time + is_repeated_guest + previous_cancellations + deposit_type + booking_changes + adr + market_segment + customer_type + total_of_special_requests, vinos, family = "binomial")
+
+#summary(modelo_log_multi)
+```
+
+```{r}
+#prob_multi <- predict(modelo_log_multi, type = c("response"))
+
+#vinos$prob_multi <- prob_multi
+
+#curva_roc_multi <- roc(is_canceled ~ prob_multi, data = vinos)
+
+#plot(curva_roc_multi)
+
+#auc(curva_roc_multi)
+```
+
+
+
+```{r}
+set.seed(369)
+
+data_split <- initial_split(vinos,
+                            prop = 0.7,
+                            strata = NULL)
+
+train_data <- training(data_split) %>% as.data.frame() 
+test_data <- testing(data_split) %>%  as.data.frame()
+
+#modelo_log_multi1 <- glm(is_canceled ~ hotel + lead_time + is_repeated_guest + previous_cancellations + deposit_type + booking_changes + adr + customer_type + total_of_special_requests, train_data, family = "binomial")
+
+#summary(modelo_log_multi1)
+```
+
+```{r}
+#test_data$prob_multi <- predict(modelo_log_multi1, test_data, type = c("response"))
+#auc(roc(is_canceled ~ prob_multi, data = test_data))
+```
+
